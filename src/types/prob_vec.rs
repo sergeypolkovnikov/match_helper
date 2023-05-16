@@ -4,9 +4,11 @@ use super::probability::Probability;
 /// 
 /// # Examples
 /// 
+/// ```
 /// let mut v = ProbVec::new(2);
 /// v.add(Probability::from(1.0));
-/// assert_eq!(v[0], Probability::zero());
+/// assert_eq!(v[1], Probability::zero());
+/// ```
 #[derive(Clone, PartialEq, Debug)]
 pub struct ProbVec(Vec<Probability>);
 

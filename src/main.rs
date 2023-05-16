@@ -9,6 +9,7 @@ use crate::types::probability::Probability;
 use crate::types::prob_vec::ProbVec;
 use crate::types::prob_vec::MatchProb;
 use crate::types::rating::Rating;
+use crate::types::team_url::TeamUrl;
 
 #[tokio::main]
 async fn main() {
@@ -34,7 +35,7 @@ trait WinProb<T = Self> {
 
 impl WinProb for Rating {
     fn win_prob(&self, other: &Self) -> Probability {
-        Probability::from(1_f64 / (1_f64 + 10_f64.powf((*self - *other) as f64 / 400_f64))) 
+        Probability::from(1_f64 / (1_f64 + 10_f64.powf((*other - *self) as f64 / 400_f64))) 
     }
 }
 
@@ -53,6 +54,8 @@ struct Player
 #[derive(Deserialize)]
 struct Team
 {
+    #[serde(rename(deserialize = "@id"))]
+    id: TeamUrl,
     players: Vec<Player>,
 }
 
@@ -75,14 +78,7 @@ struct TeamMatch
     #[serde(rename(deserialize = "@id"))]
     id: String,
     #[serde(rename(deserialize = "opponent"))]
-    opponent_url: String
-}
-
-impl TeamMatch {
-    fn opponent(&self) -> &str {
-        let start = "https://api.chess.com/pub/club/";
-        &self.opponent_url[start.len()..]
-    }
+    opponent_url: TeamUrl
 }
 
 #[derive(Deserialize)]
@@ -99,10 +95,9 @@ async fn read_matches(team: &str) -> Result<Vec<TeamMatch>, Box<dyn std::error::
 }
 
 async fn print_match_prob(team: &str, team_match: &TeamMatch) -> () {
-    if let Ok(prob) = calc_match_prob(&team_match.id).await {
-        let prob = if team != team_match.opponent() { prob } else { prob.rev() };
+    if let Ok(prob) = calc_match_prob(&team_match.id, team).await {
         println!("Match with '{}' : win {}, draw {}, lose {}"
-            , team_match.opponent()
+            , team_match.opponent_url.to_team_name()
             , prob.prob_to_win()
             , prob.prob_to_draw()
             , prob.prob_to_lose());
@@ -110,14 +105,15 @@ async fn print_match_prob(team: &str, team_match: &TeamMatch) -> () {
     else { println!("Error"); }
 }
 
-async fn calc_match_prob(link: &str) -> Result<MatchProb, Box<dyn std::error::Error>> {
+async fn calc_match_prob(link: &str, team: &str) -> Result<MatchProb, Box<dyn std::error::Error>> {
     let req = reqwest::get(link).await?;
     let mut match_ = req.json::<Match>().await?;
-    match_.teams.team1.players.sort_by_key(|p| p.rating);
-    match_.teams.team2.players.sort_by_key(|p| p.rating);
+    match_.teams.team1.players.sort_by_key(|p| -p.rating); // minus - sort by descending
+    match_.teams.team2.players.sort_by_key(|p| -p.rating);
     let probs = match_.teams.team1.players.iter()
         .zip(match_.teams.team2.players.iter())
         .map(|(fst, snd)| fst.win_prob(snd))
         .fold(ProbVec::new(match_.teams.team1.players.len() * 2 + 1), |mut v, p| { v.add(p); v.add(p); v }); // double call: white & black
-    Ok(probs.get_match_prob())
+    let prob = probs.get_match_prob();
+    Ok(if match_.teams.team1.id.to_team_name() == team { prob } else { prob.rev() })
 }
